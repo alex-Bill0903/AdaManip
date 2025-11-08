@@ -8,7 +8,7 @@ task:
 
 env:
   env_name: "open bottle"
-  numEnvs: 7
+  numEnvs: 32
   numObservations: 26
   numActions: 9
   envSpacing: 2.0
@@ -58,12 +58,44 @@ env:
   asset:
     assetRoot: "./assets"
     datasetPath: "bottle"
-    AssetNum: 7
+    AssetNum: 32
     randomAsset: False
     load_block: "train"
     limit_random: 0.5
     Assets:
       'train':
+        # 'b1':
+        #   bounding_box: b1/bounding_box.json
+        #   name: 'b1'
+        #   path: b1/mobility.urdf
+        # 'b2':
+        #   bounding_box: b2/bounding_box.json
+        #   name: 'b2'
+        #   path: b2/mobility.urdf
+        # 'b6':
+        #   bounding_box: b6/bounding_box.json
+        #   name: 'b6'
+        #   path: b6/mobility.urdf
+        # 'b12':
+        #   bounding_box: b12/bounding_box.json
+        #   name: 'b12'
+        #   path: b12/mobility.urdf
+        # 'b10':
+        #   bounding_box: b10/bounding_box.json
+        #   name: 'b10'
+        #   path: b10/mobility.urdf
+        # 'b15':
+        #   bounding_box: b15/bounding_box.json
+        #   name: 'b15'
+        #   path: b15/mobility.urdf
+        # 'b7':
+        #   bounding_box: b7/bounding_box.json
+        #   name: 'b7'
+        #   path: b7/mobility.urdf
+        # 'b13':
+        #   bounding_box: b13/bounding_box.json
+        #   name: 'b13'
+        #   path: b13/mobility.urdf
         'b1':
           bounding_box: b1/bounding_box.json
           name: 'b1'
@@ -72,26 +104,126 @@ env:
           bounding_box: b2/bounding_box.json
           name: 'b2'
           path: b2/mobility.urdf
+        'b3':
+          bounding_box: b3/bounding_box.json
+          name: 'b3'
+          path: b3/mobility.urdf
+        'b4':
+          bounding_box: b4/bounding_box.json
+          name: 'b4'
+          path: b4/mobility.urdf
+        'b5':
+          bounding_box: b5/bounding_box.json
+          name: 'b5'
+          path: b5/mobility.urdf
         'b6':
           bounding_box: b6/bounding_box.json
           name: 'b6'
           path: b6/mobility.urdf
-        'b12':
-          bounding_box: b12/bounding_box.json
-          name: 'b12'
-          path: b12/mobility.urdf
-        'b10':
-          bounding_box: b10/bounding_box.json
-          name: 'b10'
-          path: b10/mobility.urdf
-        'b15':
-          bounding_box: b15/bounding_box.json
-          name: 'b15'
-          path: b15/mobility.urdf
         'b7':
           bounding_box: b7/bounding_box.json
           name: 'b7'
           path: b7/mobility.urdf
+        'b8':
+          bounding_box: b8/bounding_box.json
+          name: 'b8'
+          path: b8/mobility.urdf
+        'b9':
+          bounding_box: b9/bounding_box.json
+          name: 'b9'
+          path: b9/mobility.urdf
+        'b10':
+          bounding_box: b10/bounding_box.json
+          name: 'b10'
+          path: b10/mobility.urdf
+        'b11':
+          bounding_box: b11/bounding_box.json
+          name: 'b11'
+          path: b11/mobility.urdf
+        'b12':
+          bounding_box: b12/bounding_box.json
+          name: 'b12'
+          path: b12/mobility.urdf
+        'b13':
+          bounding_box: b13/bounding_box.json
+          name: 'b13'
+          path: b13/mobility.urdf
+        'b14':
+          bounding_box: b14/bounding_box.json
+          name: 'b14'
+          path: b14/mobility.urdf
+        'b15':
+          bounding_box: b15/bounding_box.json
+          name: 'b15'
+          path: b15/mobility.urdf
+        'b16':
+          bounding_box: b16/bounding_box.json
+          name: 'b16'
+          path: b16/mobility.urdf
+        'b17':
+          bounding_box: b17/bounding_box.json
+          name: 'b17'
+          path: b17/mobility.urdf
+        'b18':
+          bounding_box: b18/bounding_box.json
+          name: 'b18'
+          path: b18/mobility.urdf
+        'b26':
+          bounding_box: b26/bounding_box.json
+          name: 'b26'
+          path: b26/mobility.urdf
+        'b27':
+          bounding_box: b27/bounding_box.json
+          name: 'b27'
+          path: b27/mobility.urdf
+        'b28':
+          bounding_box: b28/bounding_box.json
+          name: 'b28'
+          path: b28/mobility.urdf
+        'b29':
+          bounding_box: b29/bounding_box.json
+          name: 'b29'
+          path: b29/mobility.urdf
+        'b30':
+          bounding_box: b30/bounding_box.json
+          name: 'b30'
+          path: b30/mobility.urdf
+        'b31':
+          bounding_box: b31/bounding_box.json
+          name: 'b31'
+          path: b31/mobility.urdf
+        'b32':
+          bounding_box: b32/bounding_box.json
+          name: 'b32'
+          path: b32/mobility.urdf
+        'b33':
+          bounding_box: b33/bounding_box.json
+          name: 'b33'
+          path: b33/mobility.urdf
+        'b34':
+          bounding_box: b34/bounding_box.json
+          name: 'b34'
+          path: b34/mobility.urdf
+        '1b':
+          bounding_box: 1b/bounding_box.json
+          name: '1b'
+          path: 1b/mobility.urdf
+        '2b':
+          bounding_box: 2b/bounding_box.json
+          name: '2b'
+          path: 2b/mobility.urdf
+        '3b':
+          bounding_box: 3b/bounding_box.json
+          name: '3b'
+          path: 3b/mobility.urdf
+        '4b':
+          bounding_box: 4b/bounding_box.json
+          name: '4b'
+          path: 4b/mobility.urdf
+        '5b':
+          bounding_box: 5b/bounding_box.json
+          name: '5b'
+          path: 5b/mobility.urdf
         
 
 
