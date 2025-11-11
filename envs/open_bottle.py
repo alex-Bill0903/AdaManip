@@ -81,13 +81,12 @@ class OpenBottle(BaseEnv):
         print("Simulator: number of assets", self.asset_num)
         print("Simulator: number of environments", self.env_num)
 
-        # if self.asset_num:
-        #     assert (self.env_num % self.asset_num == 0)
+        if self.asset_num:
+            assert (self.env_num % self.asset_num == 0)
 
         assert (self.asset_num <= assets_list_len)  # the number of used length must less than real length
 
         self.env_per_asset = self.env_num // self.asset_num
-        # self.asset_indices_for_envs = torch.randint(0, self.asset_num, (self.env_num,), device=self.device)
 
         self.dof_lower_limits_tensor = torch.zeros((self.asset_num, 2), device=self.device)
         self.dof_upper_limits_tensor = torch.zeros((self.asset_num, 2), device=self.device)
