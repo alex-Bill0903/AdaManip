@@ -19,6 +19,11 @@ from dataset.dataset import Experience, Episode_Buffer, obs_wrapper
 import ipdb,time,os
 import collections
 from scipy.spatial.transform import Rotation as R
+from isaacgym import gymutil, gymtorch, gymapi
+import cv2
+import os
+import subprocess
+import sys
 
 class OpenBottleManipulation(BaseManipulation) :
 
@@ -61,6 +66,28 @@ class OpenBottleManipulation(BaseManipulation) :
             pred_pose = torch.cat([pred_p, pred_q], dim=-1).float()
             for j in range(15):
                 self.env.step(pred_pose)   
+                
+    def _write_frame_to_video(self, ffmpeg_process_list, obs):
+        """
+        Helper function to:
+        1. Take an *existing* observation (obs).
+        2. Write its RGB frame to the correct FFMPEG process.
+        """
+        try:
+            rgb_tensor = obs["rgb"] # (Ensure this key is correct)
+        except KeyError:
+            print("Error: 'obs' dictionary does not contain key 'rgb'.")
+            return
+
+        for env_id in range(self.env.num_envs):
+            rgba_image_np = rgb_tensor[env_id].cpu().numpy()
+            bgr_image = cv2.cvtColor(rgba_image_np, cv2.COLOR_RGBA2BGR)
+            try:
+                ffmpeg_process_list[env_id].stdin.write(bgr_image.tobytes())
+            except (IOError, BrokenPipeError) as e:
+                # This can happen if the simulation finishes early
+                print(f"Warning: FFMPEG pipe for env {env_id} broke: {e}")
+                pass
 
     def diffusion_evaluate(self, grasp_net, manip_net):
         eps_num = self.cfg["task"]["num_eval_episode"]
@@ -69,20 +96,68 @@ class OpenBottleManipulation(BaseManipulation) :
         succ_cnt = 0
         succ_rate = []
         print("eval_eps_{},max_step_{},policy_{}".format(eps_num, max_step, policy))
+        
+       # --- Video Recording STEP 1: Setup output directory and camera params ---
+        cam_width = self.cfg["env"]["cam"]["width"]
+        cam_height = self.cfg["env"]["cam"]["height"]
+        base_video_output_dir = "eval_videos" # Base directory
+        os.makedirs(base_video_output_dir, exist_ok=True) 
+        
+        record_fps = 30 # Define FPS here
+
+        # --- Video Recording STEP 2: Create ENV-SPECIFIC sub-directories ---
+        # This loop runs ONCE, before all episodes
+        env_dirs = []
+        for env_id in range(self.env.num_envs):
+            # e.g., "eval_videos/env_0", "eval_videos/env_1"
+            env_dir = os.path.join(base_video_output_dir, f"env_{env_id}")
+            os.makedirs(env_dir, exist_ok=True)
+            env_dirs.append(env_dir) # Save the path for later use
+        
+        print(f"Created {self.env.num_envs} environment folders in {base_video_output_dir}")
+        
         for eps in range(eps_num):
             self.env.reset()
             done_flag = [False] * self.env.num_envs
 
-            self.diffusion_eval_grasp(grasp_net)
+            # --- Video Recording STEP 3: Initialize FFmpeg Subprocesses ---
+            ffmpeg_process_list = []
+            temp_filenames = []
+            for env_id in range(self.env.num_envs):
+                # The path now uses the pre-defined env_dir for this env_id
+                temp_name = f"{env_dirs[env_id]}/episode_{eps}_TEMP.mp4" 
+                temp_filenames.append(temp_name)
+                
+                ffmpeg_command = [
+                    'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', 
+                    '-s', f'{cam_width}x{cam_height}', '-pix_fmt', 'bgr24', 
+                    '-r', str(record_fps), '-i', '-', '-an', '-vcodec', 'libx264', 
+                    '-pix_fmt', 'yuv420p', temp_name
+                ]
+                
+                process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, 
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ffmpeg_process_list.append(process)
+            
+            print(f"Recording video for episode {eps} into env_id subfolders...")
+            
+
+            self.diffusion_eval_grasp(grasp_net, ffmpeg_process_list)
             hand_pose = self.env.hand_rigid_body_tensor[:,:7]
             self.env.gripper = True
             for i in range(10):
                 self.env.step(hand_pose)
+                obs = self.env.collect_diff_data(flag = False)
+                self._write_frame_to_video(ffmpeg_process_list, obs)
+                
 
             init_actions = self.action_process(hand_pose)
             self.env.actions = init_actions
             #################manipulation policy#################
-            obs = self.env.collect_diff_data(flag = False)
+            
+            # obs is already correct from the end of the gripper loop
+            # obs = self.env.collect_diff_data(flag = False)
+            
             pcs, env_state = obs_wrapper(obs)
             pcs_deque = collections.deque([pcs] * manip_net.args.obs_horizon, maxlen=manip_net.args.obs_horizon)
             env_state_deque = collections.deque([env_state] * manip_net.args.obs_horizon, maxlen=manip_net.args.obs_horizon)
@@ -107,6 +182,7 @@ class OpenBottleManipulation(BaseManipulation) :
 
                     self.env.actions = action[:, act, :]
                     obs = self.env.collect_diff_data(flag = False)
+                    self._write_frame_to_video(ffmpeg_process_list, obs)
                     pcs, env_state = obs_wrapper(obs)
                         
                     pcs_deque.append(pcs)
@@ -117,6 +193,21 @@ class OpenBottleManipulation(BaseManipulation) :
                         #print(f"Env {env_id} Succeeded")
                         done_flag[env_id] = True
                         succ_cnt += 1
+                                           
+            # --- Video Recording STEP 5: Close pipes and rename files ---
+            print(f"Saving videos for episode {eps}...")
+            for env_id in range(self.env.num_envs):
+                ffmpeg_process_list[env_id].stdin.close()
+                ffmpeg_process_list[env_id].wait()
+
+                status_tag = "SUCCESS" if done_flag[env_id] else "FAILURE"
+                
+                # The final name also uses the env_dir path
+                final_name = f"{env_dirs[env_id]}/episode_{eps}_{status_tag}.mp4"
+                os.rename(temp_filenames[env_id], final_name)
+            
+            print(f"Videos saved to {base_video_output_dir} and tagged with SUCCESS/FAILURE.")
+            
             cur_rate = succ_cnt/(self.env.num_envs)
             print(done_flag)
             print(f"Eps {eps+1}, current succ rate {cur_rate}")
@@ -127,8 +218,10 @@ class OpenBottleManipulation(BaseManipulation) :
         print(f"Success rate std: {np.std(succ_rate)}")
         return
     
-    def diffusion_eval_grasp(self, grasp_net):
+    def diffusion_eval_grasp(self, grasp_net , ffmpeg_process_list):
         obs = self.env.collect_diff_data(flag = True)
+        self._write_frame_to_video(ffmpeg_process_list, obs)
+        
         pcs, env_state = obs_wrapper(obs)
         pcs_deque = collections.deque([pcs] * grasp_net.args.obs_horizon, maxlen=grasp_net.args.obs_horizon)
         env_state_deque = collections.deque([env_state] * grasp_net.args.obs_horizon, maxlen=grasp_net.args.obs_horizon)
@@ -147,6 +240,7 @@ class OpenBottleManipulation(BaseManipulation) :
                 
                 self.env.actions = action[:, act, :]
                 obs = self.env.collect_diff_data(flag = True)
+                self._write_frame_to_video(ffmpeg_process_list, obs)
                 pcs, env_state = obs_wrapper(obs)
 
                 pcs_deque.append(pcs)
@@ -200,6 +294,9 @@ class OpenBottleManipulation(BaseManipulation) :
             
             # update env end flag
             for env_id in range(self.env.num_envs):
+                model_name = self.env.asset_name_list[env_id]
+                print(f"[Debug] Env ID {env_id} using: {model_name}")
+                    
                 demo_buffer.append(self.eps_buffer[env_id])
             print(f"Episode {eps} Succeeded")
             
@@ -229,26 +326,40 @@ class OpenBottleManipulation(BaseManipulation) :
             done_flag = [False] * self.env.num_envs
             print("eps_{}".format(eps+1))
             self.env.reset()
-
+            print('hello come?')
+            print('self.env.num_envs = ', self.env.num_envs)
             hand_pose = self.env.hand_rigid_body_tensor[:,:7]
-
+            print('self.env.hand_rigid_body_tensor[0] = ', self.env.hand_rigid_body_tensor[0])
             
             pre_pose = self.env.adjust_hand_pose.clone()
+            # print(f"Config num_envs: {self.env.num_envs}")
+            # print(f"adjust_hand_pose shape: {self.env.adjust_hand_pose.shape}")
+            # print(f"pre_pose shape: {pre_pose.shape}")
             pre_pose[:,2] += self.env.gripper_length*2
 
             for i in range(3):
                 for j in range(10):
                     self.env.step(pre_pose)
-                
+            # print('line 246 ok')
             # grasp the handle
             pre_pose[:, 2] -= self.env.gripper_length + 0.008
+            # print(f"gripper_length value: {self.env.gripper_length}")
+            # print(f"Sample pre_pose [0] *after* subtraction: {pre_pose[0]}")
+            # print('pre_pose :', pre_pose)
+            
             for i in range(3):
                 for j in range(10):
+                    # print('i=', i, 'j=', j)
                     self.env.step(pre_pose)
+                    if torch.isnan(self.env.hand_rigid_body_tensor).any():
+                        raise Exception("NaN detected in rigid_body_tensor")
+            # print('line 252 ok')
             
+            # print('hand_pose :', hand_pose)
             self.env.gripper = True
             for i in range(10):
                 self.env.step(hand_pose)
+                
 
             
             # self.diffusion_eval_grasp(grasp_net)

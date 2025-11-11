@@ -81,12 +81,13 @@ class OpenBottle(BaseEnv):
         print("Simulator: number of assets", self.asset_num)
         print("Simulator: number of environments", self.env_num)
 
-        if self.asset_num:
-            assert (self.env_num % self.asset_num == 0)
+        # if self.asset_num:
+        #     assert (self.env_num % self.asset_num == 0)
 
         assert (self.asset_num <= assets_list_len)  # the number of used length must less than real length
 
         self.env_per_asset = self.env_num // self.asset_num
+        # self.asset_indices_for_envs = torch.randint(0, self.asset_num, (self.env_num,), device=self.device)
 
         self.dof_lower_limits_tensor = torch.zeros((self.asset_num, 2), device=self.device)
         self.dof_upper_limits_tensor = torch.zeros((self.asset_num, 2), device=self.device)
@@ -466,6 +467,7 @@ class OpenBottle(BaseEnv):
 
     def init_obj_dof_state(self, env_id):
         door_type = env_id // self.env_per_asset
+        # door_type = self.asset_indices_for_envs[env_id].item()
         dof_props = self.gym.get_asset_dof_properties(self.asset_list[door_type])
         # print(dof_props['lower'][1], dof_props['upper'][1])
         if self.task == "open_bottle":
@@ -501,8 +503,16 @@ class OpenBottle(BaseEnv):
 
             self.obj_lower_limits_tensor = self.dof_lower_limits_tensor.repeat_interleave(self.env_per_asset,dim=0)
             self.obj_upper_limits_tensor = self.dof_upper_limits_tensor.repeat_interleave(self.env_per_asset,dim=0)
-
             self.goal_pos_offset_tensor = self.goal_pos_offset_tensor.repeat_interleave(self.env_per_asset, dim=0)
+            
+            # # self.dof_lower_limits_tensor 的 shape 是 [1000, 2]
+            # # self.asset_indices_for_envs 的 shape 是 [256]
+            # # 我們用 gather/indexing 來挑出 256 個 asset 的屬性
+            # self.obj_lower_limits_tensor = self.dof_lower_limits_tensor[self.asset_indices_for_envs]
+            # self.obj_upper_limits_tensor = self.dof_upper_limits_tensor[self.asset_indices_for_envs]
+            
+            # # 建立一個「新」的 tensor 來存放 env 的 goal_pos，才不會覆蓋舊的
+            # self.env_goal_pos_offset_tensor = self.goal_pos_offset_tensor[self.asset_indices_for_envs]
 
             self.obj_loaded = True
         
@@ -516,6 +526,16 @@ class OpenBottle(BaseEnv):
             env_id,
             1,
             0)
+        
+        # asset_index = self.asset_indices_for_envs[env_id].item()
+        # obj_actor = self.gym.create_actor(
+        #     env_ptr,
+        #     self.asset_list[asset_index],    # <-- 使用 asset_index
+        #     self.pose_list[asset_index],    # <-- 使用 asset_index
+        #     f"bottle-{asset_index}-{env_id}", # 命名 (asset_index, env_id)
+        #     env_id,
+        #     1,
+        #     0)
                 
         self.actor_list.append(obj_actor)
 
@@ -549,6 +569,8 @@ class OpenBottle(BaseEnv):
         for id, (name, val) in asset_config_list:
 
             self.asset_name_list.append(val["name"])
+            
+            print(f"loding asset ID: {id}, name: {val['name']}")
 
             asset_options = gymapi.AssetOptions()
             asset_options.fix_base_link = True
@@ -602,8 +624,8 @@ class OpenBottle(BaseEnv):
         height = 0.3
         if name == "b6" or name =="b7":
             height = 0.2
-        if name == "xx":
-            height == 0.25
+        # if name == "xx":
+        #     height == 0.25
         cabinet_start_pose = gymapi.Transform()
         cabinet_start_pose.p = gymapi.Vec3(0.0, 0.0, -min_dict[2]+height)
         cabinet_start_pose.r = gymapi.Quat(0.0, 0.0, 1.0, 0.0)
@@ -694,7 +716,6 @@ class OpenBottle(BaseEnv):
 
     def step(self, actions):
         self._perform_actions(actions)
-
         self.gym.simulate(self.sim)
         self.gym.fetch_results(self.sim, True)
 
@@ -709,7 +730,6 @@ class OpenBottle(BaseEnv):
         #     self.cal_success()
         self.open_bottle_stage = ((torch.abs(self.two_dof_tensor[:, 0]) >= 0.85 * 
                                    (self.obj_actor_dof_upper_limits_tensor[:, 1] - self.obj_actor_dof_lower_limits_tensor[:, 1])))
-        
         self.refresh_mechanism()
         done = self.reset_buf.clone()
         success = self.success.clone()
@@ -793,6 +813,7 @@ class OpenBottle(BaseEnv):
 
     def collect_diff_data(self, flag=True):
         pc = self.compute_point_cloud_state(depth_bar = 2.5, type="fixed")
+        rgb_tensor = self.compute_rgb_image_state()
         normalize_flag = False
         if flag:
             pc = self.pc_normalize(pc)
@@ -807,7 +828,11 @@ class OpenBottle(BaseEnv):
         prev_actions = self.actions
         dof_state = torch.cat([self.one_dof_tensor[:,0].unsqueeze(-1), self.two_dof_tensor[:,0].unsqueeze(-1)], dim=-1)
 
-        obs = {"pc": pc, "proprioception": proprioception_info, "dof_state": dof_state, "prev_action": prev_actions}
+        obs = {"pc": pc, 
+               "proprioception": proprioception_info, 
+               "dof_state": dof_state, 
+               "prev_action": prev_actions, 
+               "rgb": rgb_tensor}
         return obs
     
     def collect_single_diff_data(self, env_id):
@@ -852,6 +877,43 @@ class OpenBottle(BaseEnv):
         
         selected_points = selected_points - self.fixed_env_origin_list[env_id]
         return selected_points
+    
+    def compute_rgb_image_state(self):
+        """
+        (This is a new helper function)
+        Mirrors the logic of compute_point_cloud_state, but fetches RGB images.
+        """
+        cam_height = self.cfg["env"]["cam"]["height"]
+        cam_width = self.cfg["env"]["cam"]["width"]
+        
+        rgb_images_list = []
+        
+        # 1. Start accessing image tensors
+        self.gym.start_access_image_tensors(self.sim)
+        
+        # 2. Iterate through all environments (using the correct list: self.env_ptr_list)
+        for env_id, env_ptr in enumerate(self.env_ptr_list): 
+            
+            # 3. Get camera handle (assuming the 0th fixed camera for recording)
+            cam_handle = self.fixed_camera_handle_list[env_id][0] 
+            
+            # 4. Get "IMAGE_COLOR" (RGBA image)
+            rgba_image = self.gym.get_camera_image(self.sim, 
+                                                    env_ptr, 
+                                                    cam_handle, 
+                                                    gymapi.IMAGE_COLOR)
+            
+            # 5. Reshape and append to list
+            rgba_image_formatted = rgba_image.reshape(cam_height, cam_width, 4)
+            rgb_images_list.append(rgba_image_formatted)
+        
+        # 6. Stop accessing image tensors
+        self.gym.end_access_image_tensors(self.sim)
+
+        # 7. Stack the list into one large (num_envs, H, W, 4) tensor
+        rgb_tensor = torch.from_numpy(np.stack(rgb_images_list)).to(self.device)
+        
+        return rgb_tensor
 
     def compute_point_cloud_state(self, depth_bar, type="fixed"):
         camera_props = gymapi.CameraProperties()
